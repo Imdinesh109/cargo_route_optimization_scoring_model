@@ -1,0 +1,24 @@
+
+Feature Contribution Summary for optimization_score
+
+Primary Positive Contributors:
+1. reliability_score
+2. capacity_available_kg
+3. lower transit time
+4. lower cost
+5. SHC compatibility
+6. lower weather risk
+7. direct routing
+
+Primary Negative Contributors:
+1. high weather_risk_score
+2. multiple connections
+3. excessive transit time
+4. high operational load factor
+5. insufficient operational efficiency
+
+Business Routing Patterns:
+- Express cargo prefers direct routes with high reliability.
+- Economy cargo accepts longer transit time for lower cost.
+- Perishable and pharmaceutical cargo heavily depend on reliability.
+- Dangerous goods have operational constraints reducing route flexibility.
