@@ -4,6 +4,7 @@ import joblib
 import plotly.graph_objects as go
 import datetime
 import warnings
+import xgboost as xgb
 warnings.filterwarnings('ignore')
 
 # ==========================================
@@ -81,7 +82,7 @@ st.title("Cargo Route Optimization System")
 st.divider()
 
 # ==========================================
-# 5. 3-COLUMN DASHBOARD (With Tooltips)
+# 5. 3-COLUMN DASHBOARD
 # ==========================================
 col1, col2, col3 = st.columns(3)
 
@@ -140,8 +141,8 @@ with col3:
                            help="Total transportation expense in Saudi Riyals (SAR). Lower cost improves the optimization score.")
     
     season_options = sorted(list(label_encoders['season'].classes_))
-    st.selectbox("Season", season_options, key="season_val", 
-                 help="Operational season. Winter/Monsoon generally carry higher operational penalties.")
+    st.selectbox("Season", season_options, key="season_val", disabled=True,
+                 help="Automatically derived from the Shipment Date. Winter/Monsoon generally carry higher operational penalties.")
     
     st.slider("Weather Risk Score", 0.0, 1.0, key="weather_val", step=0.01, 
               help="Calculated risk of meteorological disruption (0.0 = Clear, 1.0 = Severe). Updates with the date.")
@@ -158,7 +159,7 @@ with col3:
 st.divider()
 
 # ==========================================
-# 6. PREDICTION LOGIC & RESULTS
+# 6. PREDICTION & IMPACT EXTRACTION
 # ==========================================
 _, center_col, _ = st.columns([1, 2, 1])
 
@@ -202,7 +203,6 @@ if center_col.button("Analyze Route", use_container_width=True):
         df_input[col] = label_encoders[col].transform(df_input[col].astype(str)).astype(int)
             
     # 3. Align columns EXACTLY to match the model's expected training order
-    # THIS is the fixed array reflecting the exact order your XGBoost model expects
     features_ordered = [
         'origin', 
         'destination', 
@@ -227,37 +227,43 @@ if center_col.button("Analyze Route", use_container_width=True):
     
     df_ready = df_input[features_ordered]
     
-    # 4. Generate prediction with clipping correction
-    with st.spinner('Calculating optimization score...'):
+    # 4. Generate prediction AND Extract SHAP Impacts
+    with st.spinner('Calculating optimization score and extracting AI forensics...'):
+        # Get raw score
         raw_score = xgb_model.predict(df_ready)[0]
         score = max(0.0, min(1.0, float(raw_score)))
+        
+        # Get exact feature impacts (SHAP values)
+        dmatrix = xgb.DMatrix(df_ready)
+        contributions = xgb_model.get_booster().predict(dmatrix, pred_contribs=True)[0]
+        
+        base_score = contributions[-1]
+        feature_impacts = contributions[:-1]
+        
+        # Extract the specific mathematical impacts for our UI metrics
+        imp_cost = feature_impacts[features_ordered.index('cost_sar')]
+        imp_time = feature_impacts[features_ordered.index('total_transit_time_hours')]
+        imp_rel  = feature_impacts[features_ordered.index('reliability_score')]
+        imp_cap  = feature_impacts[features_ordered.index('capacity_available_kg')]
     
     # 5. Display Clean Split Layout
     out_col1, out_col2 = st.columns([1.2, 1.0])
     
     with out_col1:
-        st.markdown(
-            f"""
-            <div style="
-                font-family: monospace; 
-                border: 1px solid #2d3139; 
-                padding: 20px; 
-                background-color: #0e1117; 
-                border-radius: 6px; 
-                box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.5);
-                white-space: pre-wrap;
-                color: #e0e0e0;
-                line-height: 1.5;
-            ">REQUESTED RAW METRICS:
--------------------------------------------
-Cost (SAR)          : <span style="color: #59b2ff; font-weight: bold;">{cost:,.2f}</span>
-Transit Time (hrs)  : <span style="color: #59b2ff; font-weight: bold;">{transit_time:.2f}</span>
-Reliability         : <span style="color: #59b2ff; font-weight: bold;">{reliability:.3f}</span>
-Capacity Available  : <span style="color: #59b2ff; font-weight: bold;">{capacity:,.2f} kg</span></div>
-            """, 
-            unsafe_allow_html=True
-        )
+        st.markdown("<h4 style='color: #e0e0e0; margin-bottom: 0px;'>AI Impact Analysis</h4>", unsafe_allow_html=True)
+        st.write("") # Quick spacer
         
+        # Create a beautiful 2x2 grid for the scorecards
+        m1, m2 = st.columns(2)
+        
+        with m1:
+            st.metric(label="Reliability Score", value=f"{reliability:.2f}", delta=f"{imp_rel:+.3f} Points")
+            st.metric(label="Estimated Cost", value=f"{cost:,.0f} SAR", delta=f"{imp_cost:+.3f} Points")
+            
+        with m2:
+            st.metric(label="Transit Time", value=f"{transit_time:.1f} hrs", delta=f"{imp_time:+.3f} Points")
+            st.metric(label="Capacity Available", value=f"{capacity:,.0f} kg", delta=f"{imp_cap:+.3f} Points")
+            
     with out_col2:
         if score >= 0.70:
             gauge_color = "#2efc03" 
